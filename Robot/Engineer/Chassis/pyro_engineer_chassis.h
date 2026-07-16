@@ -10,6 +10,8 @@
 //#include "pyro_supercap_drv.h"
 // 超级电容驱动暂时不使用，后续可按需添加
 #include "engineer_config.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 
 namespace pyro

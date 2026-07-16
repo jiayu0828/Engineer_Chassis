@@ -12,7 +12,8 @@
 using namespace pyro;
 
 /*=================常量===============*/
-static constexpr uint16_t FRAME_HEADER = 0xA5A5;
+static constexpr uint16_t FRAME_HEADER = 0xFFA5;
+//更正：老代码是0xFFA5
 static constexpr uint8_t RX_QUEUE_SIZE = 10;
 static constexpr uint32_t CALLBACK_OWNER = 0x01;
 static constexpr uint32_t TIMEOUT_MS = 100;//通信超时时间（ms）
@@ -23,27 +24,19 @@ static constexpr uint32_t TIMEOUT_MS = 100;//通信超时时间（ms）
 //上层版->底盘
 struct upper_to_lower_frame_t{
     uint16_t frame_header;//帧头 0xA5A5
-
+    //状态切换：使能/失能
+    int16_t enable;
     //底盘速度指令
     float vx;
     float vy;
     float wz;
 
-
-    //状态切换：使能/失能
-    uint8_t enable;//0=失能，1=使能
-
     //矿仓控制
-    uint8_t magazine_pos;//矿仓3个档位
-
-    //后摇臂控制（目前不会给反应）
-
-    uint8_t lift_mode;   //摇臂模式 0 = AUTO  1 = MANUAL
-    uint8_t lift_auto_action; //自动模式动作： 0 = HOLD（保持） 1 = DEPLOY(展开) 2 = RETRACT(收回)
-    uint8_t lift_manual; // 手动模式动作：高4位左摇臂，低4位右摇臂（0 = 停，1 = 升，2 = 降）
+    int16_t magazine_pos;
 
 
-    uint8_t reserved[2];//预留两个字节，以防我后面还什么其他的
+    //对于摇臂控制现在先不管他
+
     uint16_t crc16;//crc16校验位
 
 };
@@ -52,28 +45,17 @@ struct lower_to_upper_frame_t
 {
     uint16_t frame_header;
     
-    // 底盘状态
-    uint8_t chassis_mode;
-    int16_t current_vx;
-    int16_t current_vy;
+    //底盘状态检查 没错置0 有错置 -1
+    int16_t chassis_online;
 
-    //矿仓状态
-    uint8_t magazine_online;
-    float magazine_angle;
+    //矿仓位置
+    int16_t magazine_pos;
 
-    //摇臂状态
-    uint8_t lift_left_online;
-    uint8_t lift_right_online;
-    float   lift_left_angle;
-    float   lift_right_angle;
+    //矿仓完成动作
+    int16_t magazine_ready;
 
-    //功率
-    uint16_t chassis_power;
-    uint8_t power_limited;
-    uint8_t reserved[2];//预留两个字节
     uint16_t crc16;
 };
-//
 #pragma pack(pop)
 
 /*===============内部变量=============*/
@@ -94,24 +76,24 @@ static uint32_t s_topic_vx;
 static uint32_t s_topic_vy;
 static uint32_t s_topic_wz;
 static uint32_t s_topic_enable;
-static uint32_t s_topic_online;
 static uint32_t s_topic_magazine_pos;
-static uint32_t s_topic_lift_mode;
-static uint32_t s_topic_lift_auto_action;
-static uint32_t s_topic_lift_manual;
+static uint32_t s_topic_magazine_ready;
+static uint32_t s_topic_online;
+
 
 /*===========接收回调============*/
+static uint32_t debug_rx_count = 0;  // 加个计数变量
+
 static bool rx_callback(uint8_t *buf,uint16_t size,BaseType_t &xHigherPriortyTaskWoken)
 {
-    if(size != sizeof(upper_to_lower_frame_t)){
-        return false;//不切换缓冲区
-    }
+    if(size == 0) return false;
+    debug_rx_count ++;
     xQueueSendFromISR(s_rx_queue,buf,&xHigherPriortyTaskWoken);
     return true;//切换缓冲区
 }
 /*=========接收解析=============*/
 static void rx_parse_and_publish(){
-    uint8_t rx_buf[sizeof(upper_to_lower_frame_t)];
+    uint8_t rx_buf[sizeof(upper_to_lower_frame_t)+10];
     //从队列里面取出来一帧
     if(xQueueReceive(s_rx_queue,rx_buf,0) != pdTRUE){
         return;
@@ -127,7 +109,7 @@ static void rx_parse_and_publish(){
     if(!s_is_online){
         s_is_online = true;//表示现在是在线的
         genenral_data_t data;
-        data.data_ui = 1;
+        data.data_si = 1;
         s_databoard->write_topic(s_topic_online, data);
     }
 
@@ -143,20 +125,11 @@ static void rx_parse_and_publish(){
     data.data_f = s_rx_frame.wz;
     s_databoard->write_topic(s_topic_wz, data);
 
-    data.data_ui = s_rx_frame.enable;
+    data.data_si = static_cast<int32_t>(s_rx_frame.enable);//强制类型转换
     s_databoard->write_topic(s_topic_enable, data);
 
-    data.data_ui = s_rx_frame.magazine_pos;
+    data.data_si = static_cast<int32_t>(s_rx_frame.magazine_pos);
     s_databoard->write_topic(s_topic_magazine_pos, data);
-
-    data.data_ui = s_rx_frame.lift_mode;
-    s_databoard->write_topic(s_topic_lift_mode, data);
-
-    data.data_ui = s_rx_frame.lift_auto_action;
-    s_databoard->write_topic(s_topic_lift_auto_action, data);
-
-    data.data_ui = s_rx_frame.lift_manual;
-    s_databoard->write_topic(s_topic_lift_manual, data);
 }
 static void check_timeout(){
     if (s_is_online &&
@@ -166,7 +139,7 @@ static void check_timeout(){
 
         // 发布离线状态
         genenral_data_t data;
-        data.data_ui = 0;
+        data.data_si = 0;
         s_databoard->write_topic(s_topic_online, data);
 
         // 速度清零，防止失控
@@ -181,6 +154,7 @@ static void check_timeout(){
 static void tx_fill_and_send()
 {
     s_tx_frame.frame_header = FRAME_HEADER;
+    //这里留着再填写
     append_crc16_check_sum(
         reinterpret_cast<uint8_t *>(&s_tx_frame),
         sizeof(lower_to_upper_frame_t));
@@ -199,9 +173,7 @@ static void databoard_topics_init()
     s_topic_enable           = s_databoard->get_topic_id("chassis_enable");
     s_topic_online           = s_databoard->get_topic_id("chassis_online");
     s_topic_magazine_pos     = s_databoard->get_topic_id("magazine_pos");
-    s_topic_lift_mode        = s_databoard->get_topic_id("lift_mode");
-    s_topic_lift_auto_action = s_databoard->get_topic_id("lift_auto_action");
-    s_topic_lift_manual      = s_databoard->get_topic_id("lift_manual");
+    s_topic_magazine_ready   = s_databoard->get_topic_id("magazine_ready");
 }
 
 static void interboard_com_thread(void *argument)
@@ -244,7 +216,7 @@ extern "C" void chassis_interboard_com_init(databoard *db_ptr)
     // 6. 创建 1ms 通信任务
     xTaskCreate(interboard_com_thread,
                 "interboard_com",
-                256,
+                512,
                 nullptr,
                 configMAX_PRIORITIES - 3,
                 &s_com_task);

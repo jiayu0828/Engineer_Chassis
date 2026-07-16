@@ -15,6 +15,7 @@ namespace pyro
 // =========================================================
 engineer_chassis_t::engineer_chassis_t()
     : module_base_t("engineer_chassis")
+
 {
     _ctx = {};
     // _ctx 是基类的 protected 成员，会被默认构造

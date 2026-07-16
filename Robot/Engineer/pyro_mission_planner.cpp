@@ -13,8 +13,9 @@
 extern "C"
 {
     extern void pyro_init_thread(void *argument);
-    extern void start_debug_task(void *arg);
+    extern void start_engineer_debug_task(void *arg);
     extern void chassis_interboard_com_init(pyro::databoard *db_ptr);
+    extern void chassis_app_init();
 }
 
 // 命名空间内的全局变量声明
@@ -47,16 +48,16 @@ extern "C" void Start_mission_planner(void const *argument)
     chassis_interboard_com_init(pyro::global_databoard);
 
     // 3. 调试任务
-    xTaskCreate(
-        start_debug_task,
-        "debug_task",
-        512,
-        nullptr,
-        configMAX_PRIORITIES - 2,
-        nullptr);
+    // xTaskCreate(
+    //     start_engineer_debug_task,
+    //     "debug_task",
+    //     512,
+    //     nullptr,
+    //     configMAX_PRIORITIES - 2,
+    //     nullptr);
 
     // TODO: 4. 初始化底盘模块 Application
-    // chassis_app_init();
+     chassis_app_init();
 
     // TODO: 5. 初始化矿仓模块
     // magazine_app_init();

@@ -70,14 +70,13 @@ add_subdirectory(PYRo)
 if(ROBOT_ID EQUAL ENGINEER_ID)
 
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/Robot/Engineer)
-    target_link_libraries(${CMAKE_PROJECT_NAME} engineer)
+    target_link_libraries(${CMAKE_PROJECT_NAME} Engineer)
 endif()
 target_link_libraries(${CMAKE_PROJECT_NAME}
     PYRo
     stm32cubemx
     CMSISDSP
     dsppp_lib
-    #engineer
     # Add user defined libraries
 )
 

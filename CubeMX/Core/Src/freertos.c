@@ -108,7 +108,7 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* definition and creation of Mission_planner */
-  osThreadDef(Mission_planner, Start_mission_planner, osPriorityLow, 0, 128);
+  osThreadDef(Mission_planner, Start_mission_planner, osPriorityLow, 0, 512);
   Mission_plannerHandle = osThreadCreate(osThread(Mission_planner), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */

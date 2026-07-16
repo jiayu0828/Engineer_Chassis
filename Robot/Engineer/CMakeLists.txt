@@ -10,6 +10,7 @@ target_sources(Engineer
         # === 入口与初始化 ===
         pyro_init_thread.cpp
         pyro_mission_planner.cpp
+        pyro_debug_task.cpp
 
         # === Chassis 底盘模块 ===
         Chassis/pyro_engineer_chassis.cpp
@@ -19,9 +20,9 @@ target_sources(Engineer
         # === Communication 通信 ===
         Communication/Chassis_board/pyro_chassis_interboard_com.cpp
         Communication/DataBoard/pyro_databoard.cpp
-
+        #Communication/Chassis_board/pyro_chassis_interboard_com_old.cpp
         # === Application 应用层（写好后取消注释） ===
-        #Application/Chassis_board/pyro_chassis_app.cpp
+        Application/Chassis_board/pyro_chassis_app.cpp
     )
 
 # ===================== 头文件包含路径 =====================
@@ -31,6 +32,7 @@ target_include_directories(Engineer
         ${CMAKE_CURRENT_SOURCE_DIR}/Chassis      # 底盘模块头文件
         ${CMAKE_CURRENT_SOURCE_DIR}/Communication/DataBoard  # DataBoard
         ${CMAKE_CURRENT_SOURCE_DIR}/Communication/Chassis_board  # 板间通信
+        
 )
 
 # ===================== 编译宏定义 =====================

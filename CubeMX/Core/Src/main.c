@@ -28,7 +28,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,6 +50,17 @@
 
 /* USER CODE BEGIN PV */
 
+/* 从链接器脚本导入的地址符号 */
+extern uint32_t _sitcm_text;
+extern uint32_t _eitcm_text;
+extern uint32_t _siitcm_text;
+
+/* 定义新的中断向量表。
+ * [关键修复]：STM32H7 中断向量数量庞大，必须满足 Cortex-M7 的 1024 字节对齐要求！
+ * 分配 256 个 uint32_t（正好 1024 字节空间）并强制 1024 字节对齐。
+ */
+#define VECTOR_TABLE_SIZE 256
+__attribute__((aligned(1024))) uint32_t dtcm_vector_table[VECTOR_TABLE_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,6 +73,30 @@ void MX_FREERTOS_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void Relocate_Vector_And_Code_To_RAM(void)
+{
+    __disable_irq(); // 搬运期间严禁中断触发
+
+    /* 1. 搬运中断向量表到 DTCM RAM */
+    /* H7 的 Flash 默认起始地址为 0x08000000，拷贝完整的 1024 字节 */
+    memcpy(dtcm_vector_table, (uint32_t*)0x08000000, sizeof(dtcm_vector_table));
+    SCB->VTOR = (uint32_t)dtcm_vector_table; // 将 Cortex-M7 的向量表偏移指向 RAM
+
+    /* 2. 搬运高频中断代码从 Flash 到 ITCM RAM */
+    uint32_t *pSrc = &_siitcm_text; // 数据在 Flash 里的源地址
+    uint32_t *pDest = &_sitcm_text; // 数据在 ITCM 里的目标运行地址
+
+    while (pDest < &_eitcm_text)
+    {
+        *pDest++ = *pSrc++;
+    }
+
+    /* 3. 内存屏障，确保缓存、流水线与总线同步 */
+    __DSB(); // 数据同步屏障
+    __ISB(); // 指令同步屏障 (丢弃流水线旧指令，强制从 ITCM 重新取指)
+
+    __enable_irq(); // 恢复中断
+}
 /* USER CODE END 0 */
 
 /**
@@ -72,7 +107,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  /* 在开启任何硬件外设和中断之前，执行分散加载与向量表重定向！*/
+  Relocate_Vector_And_Code_To_RAM();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

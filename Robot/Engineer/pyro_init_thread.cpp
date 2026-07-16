@@ -7,7 +7,7 @@
 
 
 namespace pyro{
-    extern "C"{
+    
     /*==================全局驱动指针========================*/
     //CAN 驱动指针
     can_drv_t *can1_drv = nullptr;
@@ -17,7 +17,8 @@ namespace pyro{
 
     databoard *global_databoard = nullptr;
     //先用我的数据板
-    void pyro_init_thread(void *argument){
+    extern "C"{
+        void pyro_init_thread(void *argument){
         dwt_drv_t::init(480);//480MHz主频
         /*      UART          */
         bsp_uart::get_uart1().enable_rx_dma();
@@ -46,12 +47,10 @@ namespace pyro{
         global_databoard->create_topic("chassis_vx",        FLOAT);
         global_databoard->create_topic("chassis_vy",        FLOAT);
         global_databoard->create_topic("chassis_wz",        FLOAT);
-        global_databoard->create_topic("chassis_enable",    UNSIGNED_INT);
-        global_databoard->create_topic("chassis_online",    UNSIGNED_INT);
-        global_databoard->create_topic("magazine_pos",      UNSIGNED_INT);
-        global_databoard->create_topic("lift_mode",         UNSIGNED_INT);
-        global_databoard->create_topic("lift_auto_action",  UNSIGNED_INT);
-        global_databoard->create_topic("lift_manual",       UNSIGNED_INT);
+        global_databoard->create_topic("chassis_enable",    SIGNED_INT);
+        global_databoard->create_topic("chassis_online",    SIGNED_INT);
+        global_databoard->create_topic("magazine_pos",      SIGNED_INT);
+        global_databoard->create_topic("magazine_ready",    SIGNED_INT);
 
 
         vTaskDelete(nullptr);
