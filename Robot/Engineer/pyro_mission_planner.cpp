@@ -16,6 +16,7 @@ extern "C"
     extern void start_engineer_debug_task(void *arg);
     extern void chassis_interboard_com_init(pyro::databoard *db_ptr);
     extern void chassis_app_init();
+    extern void pyro_debug_task(void *argument);
 }
 
 // 命名空间内的全局变量声明
@@ -45,7 +46,8 @@ extern "C" void Start_mission_planner(void const *argument)
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // 2. 初始化板间通信（内部会自己创建 1ms 任务）
-    chassis_interboard_com_init(pyro::global_databoard);
+    //这里面先不写，避免因为它的原因导致我的代码被锁死
+    //chassis_interboard_com_init(pyro::global_databoard);
 
     // 3. 调试任务
     // xTaskCreate(
@@ -55,7 +57,14 @@ extern "C" void Start_mission_planner(void const *argument)
     //     nullptr,
     //     configMAX_PRIORITIES - 2,
     //     nullptr);
-
+    xTaskCreate(
+        pyro_debug_task,
+        "pyro_debug_task",
+        512,
+        nullptr,
+        configMAX_PRIORITIES - 2,
+        nullptr
+    );//创建CUIJ的debug代码
     // TODO: 4. 初始化底盘模块 Application
      chassis_app_init();
 

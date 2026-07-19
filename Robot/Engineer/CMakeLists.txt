@@ -10,15 +10,16 @@ target_sources(Engineer
         # === 入口与初始化 ===
         pyro_init_thread.cpp
         pyro_mission_planner.cpp
-        pyro_debug_task.cpp
+        #pyro_debug_task.cpp
+        #现在我用的不是队里面的debug 模式，我要用的是我们工程自己开发的Debug模式
 
         # === Chassis 底盘模块 ===
         Chassis/pyro_engineer_chassis.cpp
         Chassis/fsm/pyro_engineer_passive_state.cpp
         Chassis/fsm/pyro_engineer_active_state.cpp
-
+        Chassis/pyro_debug_thread.cpp
         # === Communication 通信 ===
-        Communication/Chassis_board/pyro_chassis_interboard_com.cpp
+        #Communication/Chassis_board/pyro_chassis_interboard_com.cpp
         Communication/DataBoard/pyro_databoard.cpp
         #Communication/Chassis_board/pyro_chassis_interboard_com_old.cpp
         # === Application 应用层（写好后取消注释） ===

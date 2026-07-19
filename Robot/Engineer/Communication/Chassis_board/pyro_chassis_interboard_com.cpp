@@ -79,7 +79,8 @@ static uint32_t s_topic_enable;
 static uint32_t s_topic_magazine_pos;
 static uint32_t s_topic_magazine_ready;
 static uint32_t s_topic_online;
-
+static uint32_t s_topic_send_online;
+//用来发送的是否在线
 
 /*===========接收回调============*/
 static uint32_t debug_rx_count = 0;  // 加个计数变量
@@ -155,6 +156,7 @@ static void tx_fill_and_send()
 {
     s_tx_frame.frame_header = FRAME_HEADER;
     //这里留着再填写
+
     append_crc16_check_sum(
         reinterpret_cast<uint8_t *>(&s_tx_frame),
         sizeof(lower_to_upper_frame_t));
@@ -174,6 +176,7 @@ static void databoard_topics_init()
     s_topic_online           = s_databoard->get_topic_id("chassis_online");
     s_topic_magazine_pos     = s_databoard->get_topic_id("magazine_pos");
     s_topic_magazine_ready   = s_databoard->get_topic_id("magazine_ready");
+    s_topic_send_online      = s_databoard->get_topic_id("online_check");//这个是用来发送数据的
 }
 
 static void interboard_com_thread(void *argument)

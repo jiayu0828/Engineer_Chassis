@@ -35,6 +35,12 @@ static engineer_deps_t    *s_deps      = nullptr;
 namespace pyro
 {
     extern databoard *global_databoard;
+    static genenral_data_t safe_read_data(uint32_t topic_id){
+        genenral_data_t data = {};
+        TickType_t timestamp;
+        global_databoard->read(topic_id,&data,timestamp);
+        return data;
+    }
 }
 
 // DataBoard topic ID
@@ -43,17 +49,16 @@ static uint32_t s_topic_vy;
 static uint32_t s_topic_wz;
 static uint32_t s_topic_enable;
 static uint32_t s_topic_online;
+static uint32_t s_topic_magazine_ready;
+static uint32_t s_topic_magazine_pos;
 
-/* ====================== PID 参数（旧工程车原值，电机端转速） ====================== */
-// 旧代码：P=0.4, I=0, D=0, 积分限幅=0, 输出限幅=10
-// 注意：旧 PID 输入是电机端转速，新模块输入是轮端 RPM
-// 轮端 RPM = 电机端 RPM / 19.2，所以 P 理论上要 ÷19.2 ≈ 0.02
-// 先按旧值等比例缩放给初始值，实车再细调
-static constexpr float MECANUM_PID_KP       = 0.02f;
-static constexpr float MECANUM_PID_KI       = 0.0f;
+/* ====================== PID 参数 ====================== */
+
+static constexpr float MECANUM_PID_KP       = 0.3f;
+static constexpr float MECANUM_PID_KI       = 0.5f;
 static constexpr float MECANUM_PID_KD       = 0.0f;
-static constexpr float MECANUM_PID_ILIMIT   = 0.0f;
-static constexpr float MECANUM_PID_MAXOUT   = 10.0f;
+static constexpr float MECANUM_PID_ILIMIT   = 10.0f;
+static constexpr float MECANUM_PID_MAXOUT   = 15.0f;
 
 /* ====================== 依赖初始化 ====================== */
 static void deps_init()
@@ -73,29 +78,35 @@ static void deps_init()
         new dji_m3508_motor_drv_t(dji_motor_tx_frame_t::id_3, bsp_can::can1); // BR
 
     /* ---------- 麦轮速度环 PID ---------- */
-    for (int i = 0; i < 4; i++)
-    {
-        s_deps->pid_deps.mecanum_pid[i] =
-            new pid_t(MECANUM_PID_KP,
-                      MECANUM_PID_KI,
-                      MECANUM_PID_KD,
-                      MECANUM_PID_ILIMIT,
-                      MECANUM_PID_MAXOUT,
-                      pid_t::INTEGRAL_LIMIT);
-    }
+
+    s_deps->pid_deps.mecanum_pid[0] = new pid_t(MECANUM_PID_KP,MECANUM_PID_KI,MECANUM_PID_KD,MECANUM_PID_ILIMIT,MECANUM_PID_MAXOUT,pid_t::INTEGRAL_LIMIT);//FL
+    s_deps->pid_deps.mecanum_pid[1] = new pid_t(MECANUM_PID_KP,MECANUM_PID_KI,MECANUM_PID_KD,MECANUM_PID_ILIMIT,MECANUM_PID_MAXOUT,pid_t::INTEGRAL_LIMIT);//FR
+    s_deps->pid_deps.mecanum_pid[2] = new pid_t(MECANUM_PID_KP,MECANUM_PID_KI,MECANUM_PID_KD,MECANUM_PID_ILIMIT,MECANUM_PID_MAXOUT,pid_t::INTEGRAL_LIMIT);//BL
+    s_deps->pid_deps.mecanum_pid[3] = new pid_t(MECANUM_PID_KP,MECANUM_PID_KI,MECANUM_PID_KD,MECANUM_PID_ILIMIT,MECANUM_PID_MAXOUT,pid_t::INTEGRAL_LIMIT);//BR
+
 
     /* ---------- 后摇臂电机（预留，暂不创建） ---------- */
-    s_deps->motor_deps.lift[0] = nullptr;
-    s_deps->motor_deps.lift[1] = nullptr;
-    s_deps->pid_deps.lift_pos_pid[0] = nullptr;
-    s_deps->pid_deps.lift_pos_pid[1] = nullptr;
-    s_deps->pid_deps.lift_vel_pid[0] = nullptr;
-    s_deps->pid_deps.lift_vel_pid[1] = nullptr;
+    s_deps->motor_deps.lift[0] = new dm_motor_drv_t(0x02,0x03,bsp_can::can2);
+    s_deps->motor_deps.lift[1] = new dm_motor_drv_t(0x00,0x01,bsp_can::can2);
+    
+    //设置达秒电机的range 范围
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[0])->set_position_range(-PI,PI);
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[0])->set_rotate_range(-52.0f,52.0f);
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[0])->set_torque_range(-27.0f,27.0f);
 
-    /* ---------- 矿仓电机（预留，暂不创建） ---------- */
-    s_deps->motor_deps.magazine = nullptr;
-    s_deps->pid_deps.magazine_pos_pid = nullptr;
-    s_deps->pid_deps.magazine_vel_pid = nullptr;
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[1])->set_position_range(-PI,PI);
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[1])->set_rotate_range(-52.0f,52.0f);
+    static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[1])->set_torque_range(-27.0f,27.0f);
+
+    s_deps->pid_deps.lift_pos_pid[0] = new pid_t(14.0f, 0.005f, 0.0012f, 0.5f, 52.0f, pid_t::INTEGRAL_LIMIT);
+    s_deps->pid_deps.lift_pos_pid[1] = new pid_t(14.0f, 0.005f, 0.0012f, 0.5f, 52.0f, pid_t::INTEGRAL_LIMIT);
+    s_deps->pid_deps.lift_vel_pid[0] = new pid_t(2.0f, 0.005f, 0.0012f, 0.5f, 27.0f, pid_t::INTEGRAL_LIMIT);
+    s_deps->pid_deps.lift_vel_pid[1] = new pid_t(2.0f, 0.005f, 0.0012f, 0.5f, 27.0f, pid_t::INTEGRAL_LIMIT);
+
+    /* ---------- 矿仓电机 ---------- */
+    s_deps->motor_deps.magazine = new dji_gm_6020_motor_drv_t(dji_motor_tx_frame_t::id_1,bsp_can::can3);
+    s_deps->pid_deps.magazine_pos_pid = new pid_t(10.0f,0.01f,0.2f,3.0f,10.0f,pid_t::INTEGRAL_LIMIT);
+    s_deps->pid_deps.magazine_vel_pid = new pid_t(0.5f, 0.2f, 0.0f, 1.0f, 3.0f,pid_t::INTEGRAL_LIMIT);
 }
 
 /* ====================== 绑定 DataBoard topic ====================== */
@@ -106,17 +117,17 @@ static void databoard_topics_bind()
     s_topic_wz     = global_databoard->get_topic_id("chassis_wz");
     s_topic_enable = global_databoard->get_topic_id("chassis_enable");
     s_topic_online = global_databoard->get_topic_id("chassis_online");
+    s_topic_magazine_pos = global_databoard->get_topic_id("magazine_pos");
+    s_topic_magazine_ready = global_databoard->get_topic_id("magazine_ready");
 }
 
 /* ====================== 从 DataBoard 读数据组装命令 ====================== */
 static void chassis_rxcmd()
 {
-    genenral_data_t data;
-    TickType_t timestamp;
+
 
     // 1. 检查板间通信是否在线
-    global_databoard->read(s_topic_online, &data, timestamp);
-    const bool is_online = (data.data_ui != 0);
+    const bool is_online = (safe_read_data(s_topic_online).data_si != 0);
 
     if (!is_online)
     {
@@ -129,21 +140,34 @@ static void chassis_rxcmd()
     }
 
     // 2. 使能开关
-    global_databoard->read(s_topic_enable, &data, timestamp);
-    s_cmd->mode = (data.data_ui != 0)
+    s_cmd->mode = (safe_read_data(s_topic_enable).data_ui != 0)
                       ? cmd_base_t::mode_t::ACTIVE
                       : cmd_base_t::mode_t::PASSIVE;
 
     // 3. 速度指令（vx/vy/wz，单位 m/s, rad/s）
-    global_databoard->read(s_topic_vx, &data, timestamp);
-    s_cmd->chassis.vx = data.data_f;
+    s_cmd->chassis.vx = safe_read_data(s_topic_vx).data_f;
 
-    global_databoard->read(s_topic_vy, &data, timestamp);
-    s_cmd->chassis.vy = data.data_f;
+    s_cmd->chassis.vy = safe_read_data(s_topic_vy).data_f;
 
-    global_databoard->read(s_topic_wz, &data, timestamp);
-    s_cmd->chassis.wz = data.data_f;
-
+    s_cmd->chassis.wz = safe_read_data(s_topic_wz).data_f;
+    
+    //4.  矿仓指令
+    switch(safe_read_data(s_topic_magazine_pos).data_si){
+        case 1:
+        s_cmd->magazine.target_pos = pyro::magazine_pos_t::POS_1;
+        break;
+        case 2:
+        s_cmd->magazine.target_pos = pyro::magazine_pos_t::POS_2;
+        break;
+        case 3:
+        s_cmd->magazine.target_pos = pyro::magazine_pos_t::POS_3;
+        break;
+        case 4:
+        s_cmd->magazine.target_pos = pyro::magazine_pos_t::POS_4;
+        break;
+        default:break;
+    }    
+    //小shit代码
     // TODO: 摇臂、矿仓命令（后续加上）
 }
 

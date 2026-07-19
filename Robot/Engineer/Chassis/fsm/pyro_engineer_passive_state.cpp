@@ -26,6 +26,7 @@ void engineer_chassis_t::state_passive_t::enter(owner *owner)
     {
         pid->clear();
     }
+    owner->_ctx.motor.magazine->disable();
 
     // TODO: 摇臂、矿仓同样处理
 }
@@ -38,7 +39,7 @@ void engineer_chassis_t::state_passive_t::execute(owner *owner)
     {
         owner->_ctx.data.out_wheel_torque[i] = 0.0f;
     }
-
+    owner->_ctx.data.out_magazine_torque = 0.0f;
     // TODO: 摇臂、矿仓也发零扭矩
 
     owner->_send_motor_command();

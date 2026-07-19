@@ -27,6 +27,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
+    #set(CMAKE_BUILD_TYPE "Relase")
+    #这个是日后正式版本用的
 endif()
 # Define the build type
 

@@ -18,12 +18,17 @@ void engineer_chassis_t::state_active_t::enter(owner *owner)
     {
         pid->clear();
     }
-
+    owner->_ctx.motor.magazine->enable();
+    owner->_ctx.pid.magazine_pos_pid->clear();
+    owner->_ctx.pid.magazine_vel_pid->clear();
     // TODO: 摇臂、矿仓同样处理
 }
 
 void engineer_chassis_t::state_active_t::execute(owner *owner)
 {
+
+
+
     // 主动状态完整控制流水线
 
     // 1. 运动学逆解

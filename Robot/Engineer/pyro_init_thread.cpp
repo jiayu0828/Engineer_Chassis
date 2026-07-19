@@ -51,7 +51,7 @@ namespace pyro{
         global_databoard->create_topic("chassis_online",    SIGNED_INT);
         global_databoard->create_topic("magazine_pos",      SIGNED_INT);
         global_databoard->create_topic("magazine_ready",    SIGNED_INT);
-
+        global_databoard->create_topic("online_check",      SIGNED_INT);
 
         vTaskDelete(nullptr);
         //干掉自己

@@ -86,6 +86,7 @@ static uint32_t s_topic_vy;
 static uint32_t s_topic_wz;
 static uint32_t s_topic_enable;
 static uint32_t s_topic_online;
+static uint32_t s_topic_send_online;//用来发送的是否在线
 static uint32_t s_topic_magazine_pos;
 static uint32_t s_topic_lift_mode;
 static uint32_t s_topic_lift_auto_action;

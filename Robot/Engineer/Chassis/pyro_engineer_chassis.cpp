@@ -14,7 +14,7 @@ namespace pyro
 // 构造函数
 // =========================================================
 engineer_chassis_t::engineer_chassis_t()
-    : module_base_t("engineer_chassis")
+    : module_base_t("engineer_chassis",512,1024,task_base_t::priority_t::HIGH)
 
 {
     _ctx = {};
@@ -51,7 +51,12 @@ status_t engineer_chassis_t::_init()
     // 4. 功率控制初始化
     // _power_control_init();
     // 5. 摇臂初始化
-    // TODO: 摇臂、矿仓的初始化写在这里
+    // TODO：
+    // 6.矿仓初始化
+    //默认我的矿仓是下力的
+    if(_ctx.motor.magazine != nullptr){
+        _ctx.motor.magazine->disable();
+    }
     //先不管它了
     //如果初始化这里都没什么问题，直接返回PYRO_OK
     return PYRO_OK;
@@ -97,10 +102,7 @@ void engineer_chassis_t::_update_feedback()
     // }
 
     // 矿仓电机
-    // if (_ctx.motor.magazine != nullptr)
-    // {
-    //     _ctx.motor.magazine->update_feedback();
-    // }
+    _ctx.motor.magazine->update_feedback();
 
     // ===== 2. 读取麦轮数据 =====
     for (int i = 0; i < 4; i++)
@@ -115,13 +117,16 @@ void engineer_chassis_t::_update_feedback()
         _ctx.data.wheel_online[i] =
             _ctx.motor.mecanum[i]->is_online();
     }
+    _ctx.data.current_wheel_rpm[1] = - _ctx.data.current_wheel_rpm[1];
+    _ctx.data.current_wheel_rpm[3] = - _ctx.data.current_wheel_rpm[3];
 
+    //不知道为什么左前轮是反了的
     // ===== 3. 里程计反算实际速度 =====
     mecanum_kin_t::wheel_speeds_t current_speed{};
     current_speed.fl = rpm_to_mps(_ctx.data.current_wheel_rpm[0], WHEEL_RADIUS);
-    current_speed.fr = rpm_to_mps(-_ctx.data.current_wheel_rpm[1], WHEEL_RADIUS);
+    current_speed.fr = rpm_to_mps(_ctx.data.current_wheel_rpm[1], WHEEL_RADIUS);
     current_speed.bl = rpm_to_mps(_ctx.data.current_wheel_rpm[2], WHEEL_RADIUS);
-    current_speed.br = rpm_to_mps(-_ctx.data.current_wheel_rpm[3], WHEEL_RADIUS);
+    current_speed.br = rpm_to_mps(_ctx.data.current_wheel_rpm[3], WHEEL_RADIUS);
     //这里是更新后的库的方便性，相当于直接计算了我麦轮的实际速度
 
     _kinematics->compute_odometry(current_speed,
@@ -136,10 +141,12 @@ void engineer_chassis_t::_update_feedback()
     //     _ctx.data.lift_online[i] = ...;
     // }
 
-    // ===== 5. TODO: 读取矿仓反馈 =====
-    // _ctx.data.current_magazine_angle = ...;
+    // ===== 5. 读取矿仓反馈 =====
+    _ctx.data.magazine_online    = _ctx.motor.magazine->is_online();
+    _ctx.data.current_magazine_angle     = _ctx.motor.magazine->get_current_position();
+    _ctx.data.current_magazine_speed     = _ctx.motor.magazine->get_current_rotate();
 
-    // ===== 6. 裁判系统功率数据 =====
+    // ===== 6. TODO ：裁判系统功率数据 =====
     // auto *referee = referee_drv_t::get_instance();
     // const auto &ref_data = referee->get_data();
     // _ctx.data.buffer_energy = ref_data.power_heat.buffer_energy;
@@ -172,6 +179,7 @@ void engineer_chassis_t::_kinematics_solve()
 // =========================================================
 void engineer_chassis_t::_mecanum_control()
 {
+
     for (int i = 0; i < 4; i++)
     {
         _ctx.data.out_wheel_torque[i] =
@@ -179,6 +187,7 @@ void engineer_chassis_t::_mecanum_control()
                 _ctx.data.target_wheel_rpm[i],
                 _ctx.data.current_wheel_rpm[i]);
     }
+    
 }
 
 // =========================================================
@@ -201,9 +210,33 @@ void engineer_chassis_t::_lift_control()
 // =========================================================
 void engineer_chassis_t::_magazine_control()
 {
-    // TODO: 根据 target_pos 查角度表，位置环PID
-    // float target_angle = MAGAZINE_ANGLES[static_cast<int>(_ctx.cmd->magazine.target_pos)];
-    // _ctx.data.out_magazine_torque = _ctx.pid.magazine_pos_pid->calculate(...);
+    //1. 档位转换
+    switch(_ctx.cmd->magazine.target_pos){
+        case magazine_pos_t::POS_1: _ctx.data.target_magazine_angle = 0.0f;       break;
+        case magazine_pos_t::POS_2: _ctx.data.target_magazine_angle = 1.5708f;    break;  // π/2
+        case magazine_pos_t::POS_3: _ctx.data.target_magazine_angle = 3.1416f;    break;  // π
+        case magazine_pos_t::POS_4: _ctx.data.target_magazine_angle = 4.7124f;    break;  // 3π/2
+        default: break;
+    }
+    //2. 位置环
+    float error = _ctx.data.target_magazine_angle - _ctx.data.current_magazine_angle;
+    if(error > PI){
+        error -= 2*PI;
+    }
+    if(error < -PI){
+        error += 2*PI;
+    }
+    float virtual_target = _ctx.data.current_magazine_angle + error;
+
+    _ctx.data.target_magazine_speed = _ctx.pid.magazine_pos_pid->calculate(
+        virtual_target,
+        _ctx.data.current_magazine_angle
+    );
+    //3. 速度环
+    _ctx.data.out_magazine_torque = _ctx.pid.magazine_vel_pid->calculate(
+        _ctx.data.target_magazine_speed,
+        _ctx.data.current_magazine_speed);
+
 }
 
 // =========================================================
@@ -221,18 +254,24 @@ void engineer_chassis_t::_power_control()
 void engineer_chassis_t::_send_motor_command() const
 {
     // 麦轮
-    for (int i = 0; i < 4; i++)
-    {
-        _ctx.motor.mecanum[i]->send_torque(_ctx.data.out_wheel_torque[i]);
-    }
+    _ctx.motor.mecanum[0]->send_torque(_ctx.data.out_wheel_torque[0]);
+    
+    _ctx.motor.mecanum[1]->send_torque(-_ctx.data.out_wheel_torque[1]);
+    
+    _ctx.motor.mecanum[2]->send_torque(_ctx.data.out_wheel_torque[2]);
+    
+    _ctx.motor.mecanum[3]->send_torque(-_ctx.data.out_wheel_torque[3]);
+    
+    //矿仓
+
+    _ctx.motor.magazine->send_torque(_ctx.data.out_magazine_torque);
 
     // TODO: 摇臂
     // for (int i = 0; i < 2; i++) {
     //     _ctx.motor.lift[i]->send_torque(_ctx.data.out_lift_torque[i]);
     // }
 
-    // TODO: 矿仓
-    // _ctx.motor.magazine->send_torque(_ctx.data.out_magazine_torque);
+  
 }
 
 // =========================================================
