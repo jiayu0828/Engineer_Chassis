@@ -51,6 +51,13 @@ static uint32_t s_topic_enable;
 static uint32_t s_topic_online;
 static uint32_t s_topic_magazine_ready;
 static uint32_t s_topic_magazine_pos;
+static uint32_t s_topic_lift_mod;
+static uint32_t s_topic_mannual;
+static uint32_t s_topic_auto;
+static uint32_t s_topic_lift_calib_trigger;
+static uint32_t s_topic_lift_calib_state;
+static uint32_t s_topic_lift_zero_valid;
+
 
 /* ====================== PID 参数 ====================== */
 
@@ -85,10 +92,11 @@ static void deps_init()
     s_deps->pid_deps.mecanum_pid[3] = new pid_t(MECANUM_PID_KP,MECANUM_PID_KI,MECANUM_PID_KD,MECANUM_PID_ILIMIT,MECANUM_PID_MAXOUT,pid_t::INTEGRAL_LIMIT);//BR
 
 
-    /* ---------- 后摇臂电机（预留，暂不创建） ---------- */
+    /* ---------- 后摇臂电机 ---------- */
     s_deps->motor_deps.lift[0] = new dm_motor_drv_t(0x02,0x03,bsp_can::can2);
     s_deps->motor_deps.lift[1] = new dm_motor_drv_t(0x00,0x01,bsp_can::can2);
-    
+    //4340
+    //J3507
     //设置达秒电机的range 范围
     static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[0])->set_position_range(-PI,PI);
     static_cast<dm_motor_drv_t*>(s_deps->motor_deps.lift[0])->set_rotate_range(-52.0f,52.0f);
@@ -119,6 +127,12 @@ static void databoard_topics_bind()
     s_topic_online = global_databoard->get_topic_id("chassis_online");
     s_topic_magazine_pos = global_databoard->get_topic_id("magazine_pos");
     s_topic_magazine_ready = global_databoard->get_topic_id("magazine_ready");
+    s_topic_lift_mod = global_databoard->get_topic_id("lift_control_mod");
+    s_topic_mannual = global_databoard->get_topic_id("lift_mannual");
+    s_topic_auto = global_databoard->get_topic_id("lift_auto");
+    s_topic_lift_calib_trigger = global_databoard->get_topic_id("lift_calib_trigger");
+    s_topic_lift_calib_state   = global_databoard->get_topic_id("lift_calib_state");
+    s_topic_lift_zero_valid    = global_databoard->get_topic_id("lift_zero_valid");
 }
 
 /* ====================== 从 DataBoard 读数据组装命令 ====================== */
@@ -127,7 +141,7 @@ static void chassis_rxcmd()
 
 
     // 1. 检查板间通信是否在线
-    const bool is_online = (safe_read_data(s_topic_online).data_si != 0);
+    const bool is_online = (safe_read_data(s_topic_online).data_ui != 0);
 
     if (!is_online)
     {
@@ -152,7 +166,7 @@ static void chassis_rxcmd()
     s_cmd->chassis.wz = safe_read_data(s_topic_wz).data_f;
     
     //4.  矿仓指令
-    switch(safe_read_data(s_topic_magazine_pos).data_si){
+    switch(safe_read_data(s_topic_magazine_pos).data_ui){
         case 1:
         s_cmd->magazine.target_pos = pyro::magazine_pos_t::POS_1;
         break;
@@ -167,8 +181,62 @@ static void chassis_rxcmd()
         break;
         default:break;
     }    
+    //5.  摇臂指令
+    uint32_t lift_mode = safe_read_data(s_topic_lift_mod).data_ui;
+    if (lift_mode == 0) {
+        // ========== 自动模式 ==========
+        s_cmd->lift.mode = lift_mode_t::AUTO;
+        uint32_t auto_action = safe_read_data(s_topic_auto).data_ui;
+        switch (auto_action) {
+            case 0:
+                s_cmd->lift.auto_action = lift_action_t::HOLD;      // 保持
+            break;
+            case 1:
+                s_cmd->lift.auto_action = lift_action_t::DEPLOY;    // 放下（目标0）
+            break;
+            case 2:
+                s_cmd->lift.auto_action = lift_action_t::RETRACT;   // 收起（目标6）
+            break;
+            default:
+                s_cmd->lift.auto_action = lift_action_t::HOLD;
+            break;
+        }
+
+    // 自动模式下手动指令无效，清零
+        s_cmd->lift.manual.left_mod  = lift_manual_mod_t::HOLD;
+        s_cmd->lift.manual.right_mod = lift_manual_mod_t::HOLD;
+
+    } else {
+        // ========== 手动模式 ==========
+        s_cmd->lift.mode = lift_mode_t::MANUAL;
+
+        uint32_t manual_cmd = safe_read_data(s_topic_mannual).data_ui;
+        lift_manual_mod_t mod = lift_manual_mod_t::HOLD;
+
+        switch (manual_cmd) {
+            case 0: mod = lift_manual_mod_t::HOLD;  break;
+            case 1: mod = lift_manual_mod_t::UP;    break;   // 向上加
+            case 2: mod = lift_manual_mod_t::DOWN;  break;   // 向下减
+            default: mod = lift_manual_mod_t::HOLD; break;
+    }
+
+    // 左右同步（先做同步，以后需要独立再加topic）
+        s_cmd->lift.manual.left_mod  = mod;
+        s_cmd->lift.manual.right_mod = mod;
+
+    // 手动模式下自动指令无效
+    s_cmd->lift.auto_action = lift_action_t::HOLD;
+    }
+    //6. 摇臂校准触发（上升沿：0→1 才触发一次）
+    static uint32_t last_lift_calib_trigger = 0;
+    uint32_t calib_trigger = safe_read_data(s_topic_lift_calib_trigger).data_ui;
+    if (calib_trigger != 0 && last_lift_calib_trigger == 0) {
+        s_chassis->lift_start_calibrate(0);  // 左
+        s_chassis->lift_start_calibrate(1);  // 右，同时触发
+    }
+    last_lift_calib_trigger = calib_trigger;
+    //0是AUTO 1是MANNUAL;
     //小shit代码
-    // TODO: 摇臂、矿仓命令（后续加上）
 }
 
 /* ====================== 1ms 喂命令任务 ====================== */
@@ -187,6 +255,22 @@ static void chassis_app_thread(void *argument)
     {
         chassis_rxcmd();
         s_chassis->set_command(*s_cmd);
+
+    // ===== 回写摇臂状态 =====
+    auto &ctx = s_chassis->get_ctx();
+
+    // 零点有效标志
+    genenral_data_t valid_data = {};
+    valid_data.data_ui = (ctx.data.lift_zero_valid[0] && ctx.data.lift_zero_valid[1]) ? 1 : 0;
+    global_databoard->write_topic(s_topic_lift_zero_valid, valid_data);
+
+    // 校准状态（取两个里进度更靠后的）
+    uint8_t s0 = (uint8_t)ctx.data.lift_calib_state[0];
+    uint8_t s1 = (uint8_t)ctx.data.lift_calib_state[1];
+    genenral_data_t state_data = {};
+    state_data.data_ui = (s0 > s1) ? s0 : s1;
+    global_databoard->write_topic(s_topic_lift_calib_state, state_data);
+
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }

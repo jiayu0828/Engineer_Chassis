@@ -57,7 +57,15 @@ enum class lift_manual_mod_t : uint8_t
     UP,         // 向上
     DOWN,       // 向下
 };
-
+enum class lift_calib_state_t : uint8_t
+{
+    IDLE = 0,       //空闲/已完成
+    CALIBRATING,    //正向找零点
+    VERIFYING,      //区间核验
+    RETRY_BACKOFF,  //失败,回退
+    CALIB_DONE,     //校准成功
+    CALIB_FAILED    //校准失败
+};
 struct lift_manual_t
 {
     lift_manual_mod_t left_mod;   // 左摇臂运动状态
@@ -163,6 +171,27 @@ struct engineer_data_ctx_t
     float current_lift_speed[2]{};      // 当前角速度 rad/s
     float target_lift_angle[2]{};       // 目标角度 rad
     float out_lift_torque[2]{};         // 输出扭矩
+    // --- 摇臂复位控制---
+    //1. 多圈展开部分
+    float lift_last_raw_pos[2];         // 上一周期原始角度
+    int32_t lift_cycle_counter[2];      // 圈数累计
+    float lift_unwrap_angle[2];         //真正意义上可以使用的角度
+
+    //2.零点偏移
+    float lift_zero_offset[2];          //零点偏移
+    bool lift_zero_valid[2];            //零点是否有效
+
+    //3.软件限位
+    float lift_min_angle;               //  下限，放下的位置
+    float lift_max_angle;               //  上限
+
+    //4. 校准状态机
+    lift_calib_state_t lift_calib_state[2];
+    int     lift_calib_retry[2];        // 已经重试的次数
+    uint32_t lift_stall_timer[2];       // 堵转的时间
+    float   lift_backoff_target[2];     //回退的目标角度
+    uint32_t lift_calib_start_time[2];  // 校准开始时间
+
 
     // --- 矿仓反馈 ---
     bool  magazine_online{};
@@ -189,6 +218,7 @@ struct engineer_context_t
     powermeter_drv_t *powermeter{nullptr};    // 功率计
     powermeter_data powermeter_feedback{};    // 功率计反馈
     power_node_t *power_motor_data[4]{};      // 功控节点（4个麦轮）
+
 };
 
 
@@ -222,6 +252,8 @@ public:
 
     // 获取上下文（非const版本，基类只有const版本）
     [[nodiscard]] engineer_context_t &get_ctx();
+    void lift_start_calibrate(int i);//外部触发校准
+    bool lift_is_caliv_done(int i);//查询校准是否完成
 
 private:
     // 构造函数私有（单例模式，通过 instance() 访问）
@@ -245,6 +277,7 @@ private:
     void _magazine_control();              // 矿仓位置控制
     void _power_control();                 // 功率限制
     void _send_motor_command() const;      // 发送所有电机指令
+    void _lift_calibrate_tick(int i);
 
     // 运动学求解器
     mecanum_kin_t *_kinematics{nullptr};

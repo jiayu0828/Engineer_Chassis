@@ -51,13 +51,26 @@ status_t engineer_chassis_t::_init()
     // 4. 功率控制初始化
     // _power_control_init();
     // 5. 摇臂初始化
-    // TODO：
+    for (int i = 0; i < 2; i++) {
+        _ctx.data.lift_last_raw_pos[i]     = 0.0f;
+        _ctx.data.lift_cycle_counter[i]    = 0;
+        _ctx.data.lift_unwrap_angle[i]     = 0.0f;
+        _ctx.data.lift_zero_offset[i]      = 0.0f;
+        _ctx.data.lift_zero_valid[i]       = false;
+        _ctx.data.lift_calib_state[i]      = lift_calib_state_t::IDLE;
+        _ctx.data.lift_calib_retry[i]      = 0;
+        _ctx.data.lift_stall_timer[i]      = 0;
+        _ctx.data.target_lift_angle[i]     = 0.0f;
+        _ctx.data.out_lift_torque[i]       = 0.0f;
+    }
+    _ctx.data.lift_min_angle = LIFT_ANGLE_MIN;
+    _ctx.data.lift_max_angle = LIFT_ANGLE_MAX;
     // 6.矿仓初始化
     //默认我的矿仓是下力的
     if(_ctx.motor.magazine != nullptr){
         _ctx.motor.magazine->disable();
     }
-    //先不管它了
+
     //如果初始化这里都没什么问题，直接返回PYRO_OK
     return PYRO_OK;
 }
@@ -95,11 +108,11 @@ void engineer_chassis_t::_update_feedback()
     }
 
     // 摇臂电机
-    // for (auto *motor : _ctx.motor.lift)
-    // {
-    //     if (motor != nullptr)
-    //         motor->update_feedback();
-    // }
+    for (auto *motor : _ctx.motor.lift)
+    {
+        if (motor != nullptr)
+            motor->update_feedback();
+    }
 
     // 矿仓电机
     _ctx.motor.magazine->update_feedback();
@@ -119,28 +132,39 @@ void engineer_chassis_t::_update_feedback()
     }
     _ctx.data.current_wheel_rpm[1] = - _ctx.data.current_wheel_rpm[1];
     _ctx.data.current_wheel_rpm[3] = - _ctx.data.current_wheel_rpm[3];
-
-    //不知道为什么左前轮是反了的
     // ===== 3. 里程计反算实际速度 =====
     mecanum_kin_t::wheel_speeds_t current_speed{};
     current_speed.fl = rpm_to_mps(_ctx.data.current_wheel_rpm[0], WHEEL_RADIUS);
     current_speed.fr = rpm_to_mps(_ctx.data.current_wheel_rpm[1], WHEEL_RADIUS);
     current_speed.bl = rpm_to_mps(_ctx.data.current_wheel_rpm[2], WHEEL_RADIUS);
     current_speed.br = rpm_to_mps(_ctx.data.current_wheel_rpm[3], WHEEL_RADIUS);
-    //这里是更新后的库的方便性，相当于直接计算了我麦轮的实际速度
-
     _kinematics->compute_odometry(current_speed,
                                   _ctx.data.real_vx,
                                   _ctx.data.real_vy,
                                   _ctx.data.real_wz);
+    // ===== 4.读取摇臂反馈 =====
+    for (int i = 0; i < 2; i++) {
+        if(!_ctx.motor.lift[i])  continue;
+        _ctx.data.lift_online[i] = _ctx.motor.lift[i]->is_online();
+        _ctx.data.current_lift_angle[i] = _ctx.motor.lift[i]->get_current_position();
+        _ctx.data.current_lift_speed[i] = _ctx.motor.lift[i]->get_current_rotate();        
+    }
+    //对原始反馈进行处理
+    for(int i = 0;i < 2;i++){
+        if(!_ctx.motor.lift[i]) continue;
+        float raw_pos = _ctx.data.current_lift_angle[i];
 
-    // ===== 4. TODO: 读取摇臂反馈 =====
-    // for (int i = 0; i < 2; i++) {
-    //     _ctx.data.current_lift_angle[i] = ...;
-    //     _ctx.data.current_lift_speed[i] = ...;
-    //     _ctx.data.lift_online[i] = ...;
-    // }
+        //===多圈展开===
+        if(raw_pos - _ctx.data.lift_last_raw_pos[i] < -PI){
+            _ctx.data.lift_cycle_counter[i]++;
+        }//如果这个东西正转过零
+        else if(raw_pos - _ctx.data.lift_last_raw_pos[i] > PI){
+            _ctx.data.lift_cycle_counter[i]--;
+        }
+        _ctx.data.lift_last_raw_pos[i] = raw_pos;
+        _ctx.data.lift_unwrap_angle[i] = raw_pos + 2.0f * PI * _ctx.data.lift_cycle_counter[i];
 
+    }
     // ===== 5. 读取矿仓反馈 =====
     _ctx.data.magazine_online    = _ctx.motor.magazine->is_online();
     _ctx.data.current_magazine_angle     = _ctx.motor.magazine->get_current_position();
@@ -165,13 +189,11 @@ void engineer_chassis_t::_kinematics_solve()
         _ctx.cmd->chassis.wz,
         mecanum_kin_t::missing_mec_e::NONE
     );
-
     // 线速度 m/s ->转速 RPM
     _ctx.data.target_wheel_rpm[0] = mps_to_rpm(wheel_speeds.fl,WHEEL_RADIUS);
     _ctx.data.target_wheel_rpm[1] = mps_to_rpm(wheel_speeds.fr,WHEEL_RADIUS);
     _ctx.data.target_wheel_rpm[2] = mps_to_rpm(wheel_speeds.bl,WHEEL_RADIUS);
     _ctx.data.target_wheel_rpm[3] = mps_to_rpm(wheel_speeds.br,WHEEL_RADIUS);
-
 }
 
 // =========================================================
@@ -179,7 +201,6 @@ void engineer_chassis_t::_kinematics_solve()
 // =========================================================
 void engineer_chassis_t::_mecanum_control()
 {
-
     for (int i = 0; i < 4; i++)
     {
         _ctx.data.out_wheel_torque[i] =
@@ -193,18 +214,204 @@ void engineer_chassis_t::_mecanum_control()
 // =========================================================
 // _lift_control()：摇臂控制
 // =========================================================
-void engineer_chassis_t::_lift_control()
+
+//============================================
+//摇臂校准：触发
+//============================================
+void engineer_chassis_t::lift_start_calibrate(int i)
 {
-    // TODO: 根据模式分发
-    // if (_ctx.cmd->lift.mode == lift_mode_t::AUTO) {
-    //     自动模式：根据 auto_action 设置目标角度
-    // } else {
-    //     手动模式：根据 manual.left_mod/right_mod 控制
-    // }
-    //
-    // 然后位置环PID → 速度环PID → 输出扭矩
+    if (i < 0 || i >= 2) return;
+    if (!_ctx.motor.lift[i]) return;
+
+    _ctx.data.lift_calib_state[i]      = lift_calib_state_t::CALIBRATING;
+    _ctx.data.lift_calib_retry[i]      = 0;
+    _ctx.data.lift_stall_timer[i]      = 0;
+    _ctx.data.lift_calib_start_time[i] = xTaskGetTickCount();
+    _ctx.data.lift_zero_valid[i]       = false;
+
+    if (_ctx.pid.lift_vel_pid[i]) _ctx.pid.lift_vel_pid[i]->clear();
 }
 
+// =========================================================
+// 摇臂校准：状态机每周期执行
+// =========================================================
+void engineer_chassis_t::_lift_calibrate_tick(int i)
+{
+    if (!_ctx.motor.lift[i] || !_ctx.pid.lift_vel_pid[i]) return;
+
+    float raw_ang = _ctx.data.current_lift_angle[i];
+    float raw_spd = fabs(_ctx.data.current_lift_speed[i]);
+    uint32_t now  = xTaskGetTickCount();
+
+    switch (_ctx.data.lift_calib_state[i])
+    {
+    case lift_calib_state_t::IDLE:
+    case lift_calib_state_t::CALIB_DONE:
+    case lift_calib_state_t::CALIB_FAILED:
+       _ctx.data.out_lift_torque[i] = 0.0f;
+        break;
+
+    // ===== 恒速找零点 =====
+    case lift_calib_state_t::CALIBRATING: {
+        float target_speed = LIFT_CALIB_SPEED * LIFT_CALIB_DIR[i];
+        float torque = _ctx.pid.lift_vel_pid[i]->calculate(
+            target_speed,
+            _ctx.data.current_lift_speed[i]
+        );
+        _ctx.data.out_lift_torque[i] = torque;
+
+        // 堵转检测
+        if (raw_spd < LIFT_CALIB_STALL_SPEED) {
+            _ctx.data.lift_stall_timer[i]++;
+            if (_ctx.data.lift_stall_timer[i] >= LIFT_CALIB_STALL_MS) {
+                _ctx.data.lift_calib_state[i] = lift_calib_state_t::VERIFYING;
+                _ctx.data.lift_stall_timer[i] = 0;
+            }
+        } else {
+            _ctx.data.lift_stall_timer[i] = 0;
+        }
+
+        // 超时保护
+        if (now - _ctx.data.lift_calib_start_time[i] > LIFT_CALIB_TIMEOUT) {
+            _ctx.data.lift_calib_state[i] = lift_calib_state_t::CALIB_FAILED;
+            _ctx.data.out_lift_torque[i] = 0.0f;
+        }
+        break;
+    }
+
+    // ===== 区间核验 =====
+    case lift_calib_state_t::VERIFYING: {
+        _ctx.data.out_lift_torque[i] = 0.0f;
+        //先卸力
+
+        if (raw_ang >= LIFT_ZERO_EXPECTED_MIN &&
+            raw_ang <= LIFT_ZERO_EXPECTED_MAX)
+        {
+            // 核验通过，记录零点
+            _ctx.data.lift_zero_offset[i]  = raw_ang;
+            _ctx.data.lift_zero_valid[i]   = true;
+            // 重置圈数，让相对角度从0开始
+            _ctx.data.lift_cycle_counter[i] = 0;
+            _ctx.data.lift_last_raw_pos[i]  = raw_ang;
+            _ctx.data.lift_unwrap_angle[i]  = raw_ang;
+            _ctx.data.target_lift_angle[i]  = 0.0f;
+
+            _ctx.data.lift_calib_state[i] = lift_calib_state_t::CALIB_DONE;
+            _ctx.data.lift_calib_retry[i] = 0;
+        }
+        else
+        {
+            // 核验失败，准备重试
+            _ctx.data.lift_calib_retry[i]++;
+            if (_ctx.data.lift_calib_retry[i] >= LIFT_CALIB_MAX_RETRY) {
+                _ctx.data.lift_calib_state[i] = lift_calib_state_t::CALIB_FAILED;
+            } else {
+                _ctx.data.lift_backoff_target[i] = raw_ang + LIFT_BACKOFF_ANGLE * LIFT_CALIB_DIR[i];
+                _ctx.data.lift_calib_state[i] = lift_calib_state_t::RETRY_BACKOFF;
+                _ctx.pid.lift_vel_pid[i]->clear();
+            }
+        }
+        break;
+    }
+
+    // ===== 失败回退 =====
+
+    // ===== 失败回退 =====
+    case lift_calib_state_t::RETRY_BACKOFF: {
+        float backoff_speed = LIFT_BACKOFF_SPEED * LIFT_CALIB_DIR[i];
+        float torque = _ctx.pid.lift_vel_pid[i]->calculate(
+            backoff_speed,
+            _ctx.data.current_lift_speed[i]
+        );
+        _ctx.data.out_lift_torque[i] = torque;
+
+        // 退到位，重新校准
+        bool backoff_done;
+        if (LIFT_CALIB_DIR[i] > 0) {
+            backoff_done = (raw_ang >= _ctx.data.lift_backoff_target[i]);
+        } else {
+            backoff_done = (raw_ang <= _ctx.data.lift_backoff_target[i]);
+        }
+        if (backoff_done) {
+            _ctx.data.lift_calib_state[i] = lift_calib_state_t::CALIBRATING;
+            _ctx.data.lift_stall_timer[i] = 0;
+            _ctx.data.lift_calib_start_time[i] = now;
+            _ctx.pid.lift_vel_pid[i]->clear();
+        }
+
+
+        break;
+    }
+    }
+}
+void engineer_chassis_t::_lift_control()
+{
+  for (int i = 0; i < 2; i++) {
+        // 判空，没创建就跳过
+        if (!_ctx.motor.lift[i] || !_ctx.pid.lift_pos_pid[i] || !_ctx.pid.lift_vel_pid[i]) continue;
+        //====校准中====
+        if (_ctx.data.lift_calib_state[i] != lift_calib_state_t::IDLE &&
+            _ctx.data.lift_calib_state[i] != lift_calib_state_t::CALIB_DONE)
+        {
+            _lift_calibrate_tick(i);   // 校准状态机自己处理发扭矩
+            continue;                  // 不走下面的位置环
+        }
+        if(!_ctx.data.lift_zero_valid[i]){
+            _ctx.data.out_lift_torque[i] = 0.0f;
+            continue;
+        }
+        //1.根据命令算目标角度
+        if (_ctx.cmd->lift.mode == lift_mode_t::MANUAL) {
+            // 手动模式：增量式，每周期加一点
+            float increment = 0.0f;
+            if (i == 0) { // 左
+                if (_ctx.cmd->lift.manual.left_mod == lift_manual_mod_t::UP)   increment =  0.002f;
+                if (_ctx.cmd->lift.manual.left_mod == lift_manual_mod_t::DOWN) increment = -0.002f;
+            } else { // 右
+                if (_ctx.cmd->lift.manual.right_mod == lift_manual_mod_t::UP)   increment =  0.002f;
+                if (_ctx.cmd->lift.manual.right_mod == lift_manual_mod_t::DOWN) increment = -0.002f;
+            }
+            _ctx.data.target_lift_angle[i] += increment;
+            //===软件限位===
+            if (_ctx.data.target_lift_angle[i] > _ctx.data.lift_max_angle)
+            _ctx.data.target_lift_angle[i] = _ctx.data.lift_max_angle;
+            if (_ctx.data.target_lift_angle[i] < _ctx.data.lift_min_angle)
+            _ctx.data.target_lift_angle[i] = _ctx.data.lift_min_angle;
+        } else {
+            // 自动模式：DEPLOY 放下（目标0），RETRACT 收起（目标6）
+            if (_ctx.cmd->lift.auto_action == lift_action_t::DEPLOY) {
+                _ctx.data.target_lift_angle[i] = 0.0f;
+            } else if (_ctx.cmd->lift.auto_action == lift_action_t::RETRACT) {
+                _ctx.data.target_lift_angle[i] = 6.0f;
+            }
+            // HOLD 就保持当前目标不变
+        }
+        //软件限位
+        if (_ctx.data.target_lift_angle[i] > _ctx.data.lift_max_angle)
+            _ctx.data.target_lift_angle[i] = _ctx.data.lift_max_angle;
+        if (_ctx.data.target_lift_angle[i] < _ctx.data.lift_min_angle)
+            _ctx.data.target_lift_angle[i] = _ctx.data.lift_min_angle;
+        // 2. 计算相对零点的反馈角度
+        float relative_angle = (_ctx.data.lift_unwrap_angle[i] - _ctx.data.lift_zero_offset[i]) * LIFT_CALIB_DIR[i];
+
+        
+        // 3. 位置环 → 目标速度
+        float target_vel = _ctx.pid.lift_pos_pid[i]->calculate(
+            _ctx.data.target_lift_angle[i],
+            relative_angle
+        );
+
+        // 4. 速度环 → 输出扭矩
+        float feedback_speed = _ctx.data.current_lift_speed[i] * LIFT_CALIB_DIR[i];
+        _ctx.data.out_lift_torque[i] = _ctx.pid.lift_vel_pid[i]->calculate(
+            target_vel,
+            feedback_speed
+        );
+        // 5. 扭矩输出乘方向，统一电机方向
+        _ctx.data.out_lift_torque[i] *= LIFT_CALIB_DIR[i];
+    }
+    // 然后位置环PID → 速度环PID → 输出扭矩
+}
 // =========================================================
 // _magazine_control()：矿仓控制
 // =========================================================
@@ -266,10 +473,12 @@ void engineer_chassis_t::_send_motor_command() const
 
     _ctx.motor.magazine->send_torque(_ctx.data.out_magazine_torque);
 
-    // TODO: 摇臂
-    // for (int i = 0; i < 2; i++) {
-    //     _ctx.motor.lift[i]->send_torque(_ctx.data.out_lift_torque[i]);
-    // }
+
+    for (int i = 0; i < 2; i++) {
+        if(_ctx.motor.lift[i]){
+            _ctx.motor.lift[i]->send_torque(_ctx.data.out_lift_torque[i]);
+        }
+    }
 
   
 }
@@ -295,6 +504,5 @@ void engineer_chassis_t::_fsm_execute()
     // 3. 执行当前状态
     _main_fsm.execute(this);
 }
-
 
 } // namespace pyro

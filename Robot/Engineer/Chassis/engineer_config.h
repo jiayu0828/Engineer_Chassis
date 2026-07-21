@@ -23,14 +23,27 @@ constexpr float MAGAZINE_ANGLES[4] = {
 // =========================================================
 // 摇臂参数
 // =========================================================
-// TODO: 根据实际机械结构调整
-constexpr float LIFT_DEPLOY_ANGLE  = 1.0f;    // 放下时的角度 (rad)
-constexpr float LIFT_RETRACT_ANGLE = 0.0f;    // 收起时的角度 (rad)
-constexpr float LIFT_MAX_ANGLE     = 1.5f;    // 最大角度限位
-constexpr float LIFT_MIN_ANGLE     = -0.2f;   // 最小角度限位
 
-constexpr float LIFT_MANUAL_SPEED  = 1.0f;    // 手动模式角速度 (rad/s)
+// ===== 摇臂校准参数 =====
+constexpr float LIFT_CALIB_SPEED        = -3.0f;    // 校准速度（rad/s，负=往零点方向）
+constexpr float LIFT_CALIB_STALL_SPEED  = 0.5f;     // 堵转速度阈值（rad/s）
+constexpr uint32_t LIFT_CALIB_STALL_MS  = 3000;      // 堵转持续时间（ms）
+constexpr uint32_t LIFT_CALIB_TIMEOUT   = 10000;    // 单次校准超时（ms）
 
+// 区间核验（观察标定后填实际值）
+constexpr float LIFT_ZERO_EXPECTED_MIN  = -3.14f;     // 零点最小值（raw角度，rad）
+constexpr float LIFT_ZERO_EXPECTED_MAX  = 6.28f;     // 零点最大值（raw角度，rad）
+
+// 重试参数
+constexpr int   LIFT_CALIB_MAX_RETRY    = 3;        // 最大重试次数
+constexpr float LIFT_BACKOFF_ANGLE      = 0.8f;     // 每次回退角度（rad）
+constexpr float LIFT_BACKOFF_SPEED      = 2.0f;     // 回退速度（rad/s）
+
+// 软件限位
+constexpr float LIFT_ANGLE_MIN          = 0.0f;     // 放下位置（相对零点）
+constexpr float LIFT_ANGLE_MAX          = 8.0f;     // 收起位置（相对零点，约1.27圈）
+
+constexpr float LIFT_CALIB_DIR[2] = {1.0f,-1.0f};
 // =========================================================
 // 最大速度限制
 // =========================================================

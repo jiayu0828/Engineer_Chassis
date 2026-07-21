@@ -21,7 +21,16 @@ void engineer_chassis_t::state_active_t::enter(owner *owner)
     owner->_ctx.motor.magazine->enable();
     owner->_ctx.pid.magazine_pos_pid->clear();
     owner->_ctx.pid.magazine_vel_pid->clear();
-    // TODO: 摇臂、矿仓同样处理
+
+    for(auto *motor : owner-> _ctx.motor.lift){
+        motor->enable();
+    }
+    for(auto *pid : owner->_ctx.pid.lift_pos_pid){
+        pid->clear();
+    }
+    for(auto *pid : owner->_ctx.pid.lift_vel_pid){
+        pid->clear();
+    }
 }
 
 void engineer_chassis_t::state_active_t::execute(owner *owner)
@@ -37,6 +46,7 @@ void engineer_chassis_t::state_active_t::execute(owner *owner)
     // 2. 麦轮速度环
     owner->_mecanum_control();
 
+    
     // 3. 摇臂控制
     owner->_lift_control();
 

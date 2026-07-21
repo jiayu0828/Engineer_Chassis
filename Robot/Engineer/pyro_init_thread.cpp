@@ -47,12 +47,17 @@ namespace pyro{
         global_databoard->create_topic("chassis_vx",        FLOAT);
         global_databoard->create_topic("chassis_vy",        FLOAT);
         global_databoard->create_topic("chassis_wz",        FLOAT);
-        global_databoard->create_topic("chassis_enable",    SIGNED_INT);
-        global_databoard->create_topic("chassis_online",    SIGNED_INT);
-        global_databoard->create_topic("magazine_pos",      SIGNED_INT);
-        global_databoard->create_topic("magazine_ready",    SIGNED_INT);
-        global_databoard->create_topic("online_check",      SIGNED_INT);
-
+        global_databoard->create_topic("chassis_enable",    UNSIGNED_INT);
+        global_databoard->create_topic("chassis_online",    UNSIGNED_INT);
+        global_databoard->create_topic("magazine_pos",      UNSIGNED_INT);
+        global_databoard->create_topic("magazine_ready",    UNSIGNED_INT);
+        global_databoard->create_topic("online_check",      UNSIGNED_INT);
+        global_databoard->create_topic("lift_calib_trigger", UNSIGNED_INT);//这个是用来触发校准的
+        global_databoard->create_topic("lift_calib_state",  UNSIGNED_INT);//这个是用来写校准状态
+        global_databoard->create_topic("lift_zero_valid",   UNSIGNED_INT);//这个是用来写零点是否有效
+        global_databoard->create_topic("lift_control_mod",  UNSIGNED_INT);//这个是用来控制我的摇臂的模式的，自动/手动
+        global_databoard->create_topic("lift_mannual",      UNSIGNED_INT);//这个是手动控制我的摇臂
+        global_databoard->create_topic("lift_auto",         UNSIGNED_INT);//这个是自动控制我的摇臂
         vTaskDelete(nullptr);
         //干掉自己
     }

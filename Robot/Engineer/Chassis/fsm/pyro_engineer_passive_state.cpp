@@ -26,9 +26,30 @@ void engineer_chassis_t::state_passive_t::enter(owner *owner)
     {
         pid->clear();
     }
-    owner->_ctx.motor.magazine->disable();
 
-    // TODO: 摇臂、矿仓同样处理
+    //矿仓
+    owner->_ctx.motor.magazine->disable();
+    owner->_ctx.data.target_magazine_angle = 0.0f;
+    owner->_ctx.data.target_magazine_speed = 0.0f;
+    owner->_ctx.data.out_magazine_torque = 0.0f;
+    owner->_ctx.pid.magazine_pos_pid->clear();
+    owner->_ctx.pid.magazine_vel_pid->clear();
+
+    //摇臂
+    for(auto *motor : owner ->_ctx.motor.lift){
+        motor->disable();
+    }
+    for(int i = 0; i < 2; i ++){
+        owner->_ctx.data.target_lift_angle[i] = 0.0f;
+        owner->_ctx.data.out_lift_torque[i] = 0.0f;
+    }
+    for(auto *pid : owner -> _ctx.pid.lift_pos_pid){
+        pid->clear();      
+    }
+    for(auto *pid : owner -> _ctx.pid.lift_vel_pid){
+        pid->clear();
+    }
+
 }
 
 void engineer_chassis_t::state_passive_t::execute(owner *owner)
@@ -40,7 +61,9 @@ void engineer_chassis_t::state_passive_t::execute(owner *owner)
         owner->_ctx.data.out_wheel_torque[i] = 0.0f;
     }
     owner->_ctx.data.out_magazine_torque = 0.0f;
-    // TODO: 摇臂、矿仓也发零扭矩
+    for(int i=0;i<2;i++){
+        owner->_ctx.data.out_lift_torque[i] = 0.0f;
+    }
 
     owner->_send_motor_command();
 }
