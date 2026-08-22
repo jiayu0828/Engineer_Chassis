@@ -76,6 +76,8 @@ target_sources(PYRo PRIVATE
         # --- Device ---
         Device/BMI088/BMI088_driver.cpp
         Device/BMI088/BMI088_middleware.cpp
+        Device/WS2812/ws2812_driver.cpp
+        Device/WS2812/ws2812_middleware.cpp
         Component/Referee/UI/pyro_ui_drv.cpp
 
 
@@ -102,6 +104,7 @@ target_include_directories(PYRo PUBLIC
 
         # --- Device ---
         Device/BMI088
+        Device/WS2812
 
         # --- Algorithm ---
         Algorithm/Common

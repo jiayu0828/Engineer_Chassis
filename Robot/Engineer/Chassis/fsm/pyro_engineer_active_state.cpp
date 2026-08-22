@@ -31,6 +31,14 @@ void engineer_chassis_t::state_active_t::enter(owner *owner)
     for(auto *pid : owner->_ctx.pid.lift_vel_pid){
         pid->clear();
     }
+    if (!owner->get_ctx().data.lift_zero_valid[0]) {
+        owner->lift_start_calibrate(0);
+    }
+    // 右摇臂零点无效 → 自动触发校准
+    if (!owner->get_ctx().data.lift_zero_valid[1]) {
+        owner->lift_start_calibrate(1);
+    }
+
 }
 
 void engineer_chassis_t::state_active_t::execute(owner *owner)

@@ -27,8 +27,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
-    #set(CMAKE_BUILD_TYPE "Relase")
-    #这个是日后正式版本用的
 endif()
 # Define the build type
 
@@ -69,11 +67,23 @@ target_include_directories(dsppp_lib INTERFACE
 add_executable(${CMAKE_PROJECT_NAME})
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/CubeMX/cmake/stm32cubemx)
 add_subdirectory(PYRo)
-if(ROBOT_ID EQUAL ENGINEER_ID)
-
+if (ROBOT_ID EQUAL HERO_ID)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/robot/hero)
+    target_link_libraries(${CMAKE_PROJECT_NAME}
+            Hero)
+elseif (ROBOT_ID EQUAL SUB_HERO_ID)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/robot/sub_hero)
+    target_link_libraries(${CMAKE_PROJECT_NAME}
+            Sub_Hero)
+elseif (ROBOT_ID EQUAL INFANTRY2_ID)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/robot/infantry2)
+elseif (ROBOT_ID EQUAL SENTRY_ID)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/robot/sentry)
+elseif (ROBOT_ID EQUAL ENGINEER_ID)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/Robot/Engineer)
-    target_link_libraries(${CMAKE_PROJECT_NAME} Engineer)
-endif()
+    target_link_libraries(${CMAKE_PROJECT_NAME}
+            Engineer)
+endif ()
 target_link_libraries(${CMAKE_PROJECT_NAME}
     PYRo
     stm32cubemx

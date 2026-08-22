@@ -43,13 +43,12 @@ status_t engineer_chassis_t::_init()
     // 2. new 麦轮运动学求解器
     _kinematics = new mecanum_kin_t(WHEELBASE, TRACK_WIDTH);
 
-    // 3. new 功率计并初始化（如果有的话）
-    
-    // _ctx.powermeter = new powermeter_drv_t(0x212, can_hub_t::can2);
+    // 3. new 功率计并初始化（如需启用功率计反馈，取消注释并确认 CAN ID）
+    // _ctx.powermeter = new powermeter_drv_t(0x212, bsp_can::can2);
     // _ctx.powermeter->init();
 
-    // 4. 功率控制初始化
-    // _power_control_init();
+    // 4. 功率控制初始化（注册4个麦轮到功率控制器）
+    _power_control_init();
     // 5. 摇臂初始化
     for (int i = 0; i < 2; i++) {
         _ctx.data.lift_last_raw_pos[i]     = 0.0f;
@@ -80,18 +79,36 @@ status_t engineer_chassis_t::_init()
 // =========================================================
 void engineer_chassis_t::_power_control_init()
 {
-    //4个麦轮的拟合系数
-    // power_fit_params_t params[4] = {
-        // {0.0115f, 0.0391f, 0.2739f,  -3.2137f},   // \[0\] FL 前左
-        // {0.0114f, 0.0214f, 0.2181f,   0.4862f},   // \[1\] FR 前右
-        // {0.0120f, 0.0353f, 0.3015f,  -4.8325f},   // \[2\] BR 后右
-        // {0.0111f, 0.0430f, 0.4013f, -11.0010f},   // \[3\] BL 后左
-    // }
-    //公式是 预测功率 = k1 * 扭矩^2 + k2 * 转速 * 扭矩 + k3 * |扭矩| + K4
-    //祝哥的数据
-    // for(int i = 0 ; i < 4;i++){
-    //     _ctx.power_motor_data[i] = power_controller_t::get_instance().register_motor(parmas[i]);
-    // }
+    /*
+     * 4个麦轮的功率拟合参数（保守默认值，需根据实际电机校准）
+     *
+     * power_fit_params_t 字段说明：
+     *   k1: 机械功率系数 (cmd * rpm)
+     *   k2: 铜损系数     (cmd^2)
+     *   k3: 高频损耗系数 (rpm^2)
+     *   k4: 低频损耗系数 (|rpm|)
+     *   k5: 静态基础功耗 (W)
+     *   alpha: 电阻温度系数 (铜默认0.00393)
+     *
+     * TODO: 替换为实际标定参数。老版本注释里的4参数模型
+     *       (k1*扭矩² + k2*转速*扭矩 + k3*|扭矩| + k4) 与本结构
+     *       语义不同，需重新拟合或手动映射。
+     */
+    power_fit_params_t params[4] = {
+        {0.001f, 0.01f, 0.0f, 0.0f, 0.5f, 0.00393f},  // [0] FL
+        {0.001f, 0.01f, 0.0f, 0.0f, 0.5f, 0.00393f},  // [1] FR
+        {0.001f, 0.01f, 0.0f, 0.0f, 0.5f, 0.00393f},  // [2] BL
+        {0.001f, 0.01f, 0.0f, 0.0f, 0.5f, 0.00393f},  // [3] BR
+    };
+
+    auto &pc = power_controller_t::get_instance();
+    for (int i = 0; i < 4; ++i) {
+        _ctx.power_motor_data[i] = pc.register_motor(params[i]);
+    }
+
+    // 配置缓冲能量环：安全能量60J，PID参数（保守值）
+    // 无裁判系统/超级电容时，此环影响较小，主要靠 solve() 的平均功率限制
+    pc.config_buffer_loop(60.0f, 0.1f, 0.01f, 0.0f);
 }
 
 // =========================================================
@@ -169,6 +186,17 @@ void engineer_chassis_t::_update_feedback()
     _ctx.data.magazine_online    = _ctx.motor.magazine->is_online();
     _ctx.data.current_magazine_angle     = _ctx.motor.magazine->get_current_position();
     _ctx.data.current_magazine_speed     = _ctx.motor.magazine->get_current_rotate();
+    _ctx.data.magazine_full[0] = (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0)  == GPIO_PIN_RESET);
+    _ctx.data.magazine_full[1] = (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_13) == GPIO_PIN_RESET);
+    _ctx.data.magazine_full[2] = (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_9)  == GPIO_PIN_RESET);
+    _ctx.data.magazine_full[3] = (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2)  == GPIO_PIN_RESET);
+
+    _ctx.data.magazine_mask = 0;
+    for(int i = 0;i < 4; i++){
+        if(_ctx.data.magazine_full[i]){
+            _ctx.data.magazine_mask |= (1<<i);//第几位置一就是第几个矿仓是有东西的
+        }
+    }
 
     // ===== 6. TODO ：裁判系统功率数据 =====
     // auto *referee = referee_drv_t::get_instance();
@@ -417,7 +445,7 @@ void engineer_chassis_t::_lift_control()
 // =========================================================
 void engineer_chassis_t::_magazine_control()
 {
-    //1. 档位转换
+    // 1. 档位转换
     switch(_ctx.cmd->magazine.target_pos){
         case magazine_pos_t::POS_1: _ctx.data.target_magazine_angle = 0.0f;       break;
         case magazine_pos_t::POS_2: _ctx.data.target_magazine_angle = 1.5708f;    break;  // π/2
@@ -443,6 +471,15 @@ void engineer_chassis_t::_magazine_control()
     _ctx.data.out_magazine_torque = _ctx.pid.magazine_vel_pid->calculate(
         _ctx.data.target_magazine_speed,
         _ctx.data.current_magazine_speed);
+    static uint8_t stable_cnt = 0;
+    if(fabs(error) < 0.1f){
+        if(stable_cnt < 20) stable_cnt++;
+        _ctx.data.magazine_ready = (stable_cnt >= 20);
+    }
+    else{
+        stable_cnt = 0;
+        _ctx.data.magazine_ready = false;
+    }
 
 }
 
@@ -451,8 +488,32 @@ void engineer_chassis_t::_magazine_control()
 // =========================================================
 void engineer_chassis_t::_power_control()
 {
-    // TODO: 参考 Sub_Hero 的写法
-    // 把4个麦轮的扭矩送到功率控制器，算出安全扭矩
+    // 1. 把当前扭矩、转速、温度填入功率节点
+    for (int i = 0; i < 4; ++i) {
+        if (_ctx.power_motor_data[i] == nullptr) continue;
+        _ctx.power_motor_data[i]->target_cmd   = _ctx.data.out_wheel_torque[i];
+        _ctx.power_motor_data[i]->uncontrolled_cmd = 0.0f;
+        _ctx.power_motor_data[i]->rpm  = _ctx.data.current_wheel_rpm[i];
+        _ctx.power_motor_data[i]->temp = _ctx.data.current_wheel_temp[i];
+    }
+
+    // 2. 调用功率控制器求解
+    //    无裁判系统时用固定功率限制80W、缓冲能量60J
+    //    后续接入裁判系统后，应从 referee 模块读取真实值
+    float referee_power_limit  = 80.0f;
+    float current_buffer_energy = 60.0f;
+    power_controller_t::get_instance().solve(
+        referee_power_limit, current_buffer_energy);
+
+    // 3. 把限制后的安全扭矩写回，覆盖 PID 输出
+    for (int i = 0; i < 4; ++i) {
+        if (_ctx.power_motor_data[i] == nullptr) continue;
+        _ctx.data.out_wheel_torque[i] = _ctx.power_motor_data[i]->safe_cmd;
+    }
+
+    // 4. 记录总预测功率（便于调试观察）
+    _ctx.data.total_predicted_power =
+        power_controller_t::get_instance().get_total_predicted_power();
 }
 
 // =========================================================

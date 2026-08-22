@@ -1,11 +1,13 @@
 /**
  * @file pyro_mission_planner.cpp
  * @brief 任务规划器（总入口，按顺序创建所有任务）
+ *
+ * 重构说明：去掉了 DataBoard 依赖。板间通信直接调用 chassis 模块，
+ * 不再需要全局 databoard 中转。
  */
 
 #include "pyro_core_def.h"
 #include "pyro_core_config.h"
-#include "pyro_databoard.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -13,16 +15,9 @@
 extern "C"
 {
     extern void pyro_init_thread(void *argument);
-    extern void start_engineer_debug_task(void *arg);
-    extern void chassis_interboard_com_init(pyro::databoard *db_ptr);
+    extern void chassis_interboard_com_init();
     extern void chassis_app_init();
-    extern void pyro_debug_task(void *argument);
-}
-
-// 命名空间内的全局变量声明
-namespace pyro
-{
-    extern databoard *global_databoard;
+    extern void ws2812_test_init();
 }
 
 /**
@@ -42,33 +37,16 @@ extern "C" void Start_mission_planner(void const *argument)
         configMAX_PRIORITIES - 1,
         nullptr);
 
-    // 等待底层驱动初始化完成（databoard 创建好了）
+    // 等待底层驱动初始化完成
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // 2. 初始化板间通信（内部会自己创建 1ms 任务）
-    //这里面先不写，避免因为它的原因导致我的代码被锁死
-    //chassis_interboard_com_init(pyro::global_databoard);
+    // 2. 初始化板间通信（内部会自己创建通信任务）
+    chassis_interboard_com_init();
 
-    // 3. 调试任务
-    // xTaskCreate(
-    //     start_engineer_debug_task,
-    //     "debug_task",
-    //     512,
-    //     nullptr,
-    //     configMAX_PRIORITIES - 2,
-    //     nullptr);
-    xTaskCreate(
-        pyro_debug_task,
-        "pyro_debug_task",
-        512,
-        nullptr,
-        configMAX_PRIORITIES - 2,
-        nullptr
-    );//创建CUIJ的debug代码
-    // TODO: 4. 初始化底盘模块 Application
-     chassis_app_init();
-
-    // TODO: 5. 初始化矿仓模块
+    // 3. 初始化底盘模块 Application
+    chassis_app_init();
+    ws2812_test_init();
+    // TODO: 4. 初始化矿仓模块
     // magazine_app_init();
 
     // 规划器任务完成使命，删除自己

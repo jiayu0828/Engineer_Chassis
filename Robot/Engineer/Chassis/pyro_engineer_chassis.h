@@ -194,6 +194,7 @@ struct engineer_data_ctx_t
 
 
     // --- 矿仓反馈 ---
+    bool  magazine_full[4];//用来判断我的四个矿仓是否有东西
     bool  magazine_online{};
     bool  magazine_ready{};             // 是否就绪
     float current_magazine_angle{0.0f}; // 当前角度
@@ -201,7 +202,7 @@ struct engineer_data_ctx_t
     float out_magazine_torque{0.0f};    // 输出扭矩
     float current_magazine_speed{0.0f}; // 当前速度
     float target_magazine_speed{0.0f};  // 目标速度
-
+    uint32_t magazine_mask{0};
     // --- 功率相关 ---
     float total_predicted_power{0.0f};
     float buffer_energy{0.0f};

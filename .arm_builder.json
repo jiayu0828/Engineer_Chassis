@@ -1,8 +1,20 @@
 {
-  "cfg_path": null,
+  "cfg_path": "C:\\Users\\30264\\Downloads\\stm32h7_daplink.cfg",
   "flash_mode": "Run",
-  "cmake_options": "-DROBOT_ID=1",
-  "backend_type": "PyOCD",
+  "cmake_options": "-DROBOT_ID=2",
+  "backend_type": "OpenOCD",
   "target_type": "stm32h723xx",
-  "breakpoints": []
+  "svd_path": "",
+  "build_type": "Debug",
+  "breakpoints": [
+    {
+      "addr": 134288892,
+      "label": "pyro_chassis_interboard_com.cpp:202",
+      "condition": "",
+      "enabled": true,
+      "hit_count": 0,
+      "source_file": "D:\\MCUnewproject\\Engineer_Chassis\\Robot\\Engineer\\Communication\\Chassis_board\\pyro_chassis_interboard_com.cpp",
+      "source_line": 202
+    }
+  ]
 }
