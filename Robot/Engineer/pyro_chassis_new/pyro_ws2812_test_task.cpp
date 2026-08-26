@@ -140,7 +140,10 @@ static void ws2812_test_thread(void *argument)
 
     // 先做自检：逐个点亮每颗LED
     
-    led.update();
+    while(true){
+        led.update();
+    }
+    
 }
 
 /* ==================== 对外初始化入口 ==================== */

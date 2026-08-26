@@ -32,7 +32,7 @@ extern "C" void Start_mission_planner(void const *argument)
     xTaskCreate(
         pyro_init_thread,
         "pyro_init",
-        512,
+        1024,
         nullptr,
         configMAX_PRIORITIES - 1,
         nullptr);

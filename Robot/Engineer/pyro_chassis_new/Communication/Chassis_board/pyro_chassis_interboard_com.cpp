@@ -236,7 +236,7 @@ extern "C" void chassis_interboard_com_init()
     // 5. 创建通信任务
     xTaskCreate(interboard_com_thread,
                 "interboard_com",
-                512,
+                1024,
                 nullptr,
                 configMAX_PRIORITIES - 3,
                 &s_com_task);

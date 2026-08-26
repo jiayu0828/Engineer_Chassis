@@ -27,14 +27,14 @@ set(ARM_EXTRA_SOURCES
         Arm/arm_app.cpp
 )
 set(CHASSIS_EXTRA_SOURCES
-        Chassis/pyro_engineer_chassis.cpp
-        Chassis/fsm/pyro_engineer_passive_state.cpp
-        Chassis/fsm/pyro_engineer_active_state.cpp
-        Application/Chassis_board/pyro_chassis_app.cpp
-        Communication/Chassis_board/pyro_chassis_interboard_com.cpp
-        pyro_init_thread.cpp
-        pyro_mission_planner.cpp
-        pyro_ws2812_test_task.cpp
+        pyro_chassis_new/Chassis/pyro_engineer_chassis.cpp
+        pyro_chassis_new/Chassis/fsm/pyro_engineer_passive_state.cpp
+        pyro_chassis_new/Chassis/fsm/pyro_engineer_active_state.cpp
+        pyro_chassis_new/Application/Chassis_board/pyro_chassis_app.cpp
+        pyro_chassis_new/Communication/Chassis_board/pyro_chassis_interboard_com.cpp
+        pyro_chassis_new/pyro_init_thread.cpp
+        pyro_chassis_new/pyro_mission_planner.cpp
+        pyro_chassis_new/pyro_ws2812_test_task.cpp
 
 )
 if (BOARD STREQUAL "ARM_BOARD")
@@ -59,9 +59,9 @@ endif()
 # ===================== 头文件包含路径 =====================
 target_include_directories(Engineer
         PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}              # Engineer 根目录
-        ${CMAKE_CURRENT_SOURCE_DIR}/Chassis      # 底盘模块头文件
-        ${CMAKE_CURRENT_SOURCE_DIR}/Communication/Chassis_board  # 板间通信
+        ${CMAKE_CURRENT_SOURCE_DIR}/pyro_chassis_new              # Engineer 根目录
+        ${CMAKE_CURRENT_SOURCE_DIR}/pyro_chassis_new/Chassis      # 底盘模块头文件
+        ${CMAKE_CURRENT_SOURCE_DIR}/pyro_chassis_new/Communication/Chassis_board  # 板间通信
         
 )
 
